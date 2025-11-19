@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>График Дежурств</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        :root {
+            --bg-color: var(--tg-theme-bg-color, #fff);
+            --text-color: var(--tg-theme-text-color, #000);
+            --hint-color: var(--tg-theme-hint-color, #999);
+            --button-color: var(--tg-theme-button-color, #2481cc);
+            --button-text-color: var(--tg-theme-button-text-color, #fff);
+            --day-bg: #eef1f5;
+            --day-night-bg: #2a2a3c;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0; padding: 10px;
+        }
+        h2 { text-align: center; margin-top: 5px; margin-bottom: 15px; }
+        
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 5px;
+            margin-bottom: 20px;
+        }
+        .weekday {
+            text-align: center;
+            font-weight: bold;
+            font-size: 12px;
+            color: var(--hint-color);
+            padding-bottom: 5px;
+        }
+        .day-cell {
+            aspect-ratio: 1;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: rgba(128, 128, 128, 0.1);
+            font-size: 14px;
+            position: relative;
+        }
+        .day-cell.today {
+            border: 2px solid var(--button-color);
+        }
+        /* Стили для смен */
+        .shift-day { background-color: #ffeaa7; color: #000; }
+        .shift-night { background-color: #74b9ff; color: #000; }
+        
+        /* Темная тема (автоматически от Телеграма) */
+        body.dark .shift-day { background-color: #fdcb6e; color: #000; }
+        body.dark .shift-night { background-color: #0984e3; color: #fff; }
+
+        .marker { font-size: 18px; margin-top: 2px; }
+        .info-box {
+            padding: 15px;
+            background: rgba(128, 128, 128, 0.1);
+            border-radius: 10px;
+            text-align: center;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <h2 id="monthTitle">Загрузка...</h2>
+    
+    <div class="calendar-grid" id="calendar">
+        <!-- Дни недели -->
+        <div class="weekday">Пн</div><div class="weekday">Вт</div><div class="weekday">Ср</div>
+        <div class="weekday">Чт</div><div class="weekday">Пт</div><div class="weekday">Сб</div><div class="weekday">Вс</div>
+        <!-- Ячейки будут тут -->
+    </div>
+
+    <div class="info-box" id="details">
+        Нажмите на день, чтобы узнать детали.
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand(); // Раскрыть на весь экран
+
+        // Парсинг данных из URL (#data=JSON)
+        let scheduleData = {};
+        try {
+            const hash = window.location.hash.substring(1);
+            const params = new URLSearchParams(hash);
+            const rawData = params.get('data');
+            if (rawData) {
+                scheduleData = JSON.parse(decodeURIComponent(rawData));
+            }
+        } catch (e) {
+            document.getElementById('details').innerText = "Ошибка чтения данных: " + e.message;
+        }
+
+        const monthNames = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
+        
+        // Определяем месяц/год из данных или текущие
+        const now = new Date();
+        const year = scheduleData.year || now.getFullYear();
+        const month = scheduleData.month ? scheduleData.month - 1 : now.getMonth(); // JS месяцы 0-11
+
+        document.getElementById('monthTitle').innerText = `${monthNames[month]} ${year}`;
+
+        function renderCalendar() {
+            const calendarEl = document.getElementById('calendar');
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            const firstDayIndex = new Date(year, month, 1).getDay() || 7; // 1-7 (Пн-Вс)
+
+            // Пустые ячейки до начала месяца
+            for (let i = 1; i < firstDayIndex; i++) {
+                const empty = document.createElement('div');
+                calendarEl.appendChild(empty);
+            }
+
+            // Дни месяца
+            for (let d = 1; d <= daysInMonth; d++) {
+                const cell = document.createElement('div');
+                cell.className = 'day-cell';
+                cell.innerText = d;
+
+                // Проверка на сегодня
+                if (d === now.getDate() && month === now.getMonth() && year === now.getFullYear()) {
+                    cell.classList.add('today');
+                }
+
+                // Проверка смен
+                const shift = (scheduleData.shifts || []).find(s => s.day === d);
+                if (shift) {
+                    if (shift.type === 'day') {
+                        cell.classList.add('shift-day');
+                        cell.innerHTML += '<div class="marker">☀️</div>';
+                    } else if (shift.type === 'night') {
+                        cell.classList.add('shift-night');
+                        cell.innerHTML += '<div class="marker">🌙</div>';
+                    }
+                    
+                    // Клик по дню
+                    cell.onclick = () => {
+                        tg.HapticFeedback.impactOccurred('light');
+                        document.getElementById('details').innerHTML = `
+                            <b>${d} ${monthNames[month]}</b><br>
+                            Ваша смена: ${shift.type === 'day' ? '☀️ День' : '🌙 Ночь'}
+                        `;
+                    };
+                }
+
+                calendarEl.appendChild(cell);
+            }
+        }
+
+        renderCalendar();
+    </script>
+</body>
+</html>
